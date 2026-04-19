@@ -1,0 +1,102 @@
+{
+  "theme": "dark",
+  "archetype": "Archetype 4 (Swiss & High-Contrast - Dark Mode Adaptation)",
+  "vibe": "Control Room, Precise, Professional, Developer-First, Brutalist, Technical",
+  "typography": {
+    "fonts": {
+      "heading": "Outfit",
+      "body": "IBM Plex Sans",
+      "mono": "JetBrains Mono"
+    },
+    "rules": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-medium text-white",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-medium text-white",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium text-gray-200",
+      "labels": "text-xs tracking-[0.2em] uppercase text-gray-500 font-mono",
+      "data": "font-mono text-sm tracking-tight text-white tabular-nums",
+      "body": "text-base leading-relaxed text-gray-400"
+    }
+  },
+  "colors": {
+    "background": "#09090B",
+    "surface": "#121214",
+    "border": "#27272A",
+    "primary": "#FFFFFF",
+    "primary_foreground": "#000000",
+    "muted": "#18181B",
+    "muted_foreground": "#A1A1AA",
+    "cv_accents": {
+      "detect": "#00FF41",
+      "segment": "#00E5FF",
+      "pose": "#FF3366",
+      "track": "#FFD500",
+      "classify": "#B026FF"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA"
+    }
+  },
+  "layout_and_spacing": {
+    "general": "Generous spacing for marketing pages (p-16 to p-32). Dense, space-efficient 'Control Room' layout for the Inference Studio (p-4 to p-6).",
+    "grid_modes": {
+      "inference_studio": "grid-cols-1 lg:grid-cols-12 gap-px bg-zinc-800 (1px borders). Sidebar task/model selector col-span-3, Main Canvas area col-span-9. Use h-[calc(100vh-64px)] for the studio to prevent scrolling.",
+      "landing_page": "Tetris bento grid, gap-8, asymmetric spans. Grid items must be direct children.",
+      "dataset_manager": "Dense table layout or responsive grid-cols-2 md:grid-cols-4 lg:grid-cols-6 for image thumbnails, gap-4."
+    }
+  },
+  "surfaces_and_micro_themes": {
+    "header": "Solid black background with a hard 1px bottom border (border-zinc-800). Z-index 50. Sticky.",
+    "dashboard_panels": "Grid Borders (The Technical Look). Use border-collapse style layouts, 1px borders, NO soft shadows. Radius max 4px (rounded-sm) or 0px (rounded-none).",
+    "glassmorphism": "Avoid in the main studio to prevent visual distraction from CV tasks. Can use 'Crystal Glass' strictly for landing page sticky nav (bg-black/80 backdrop-blur-xl)."
+  },
+  "motion_and_interactions": {
+    "hover_states": "Hard background shifts (hover:bg-white hover:text-black) or sharp border highlights (hover:border-white). No slow generic fades.",
+    "cv_canvas": "Bounding boxes should have 2px solid borders in cv_accents colors and subtle translucent fill (10% opacity). Keypoints for pose should be solid circles.",
+    "page_transitions": "Instant or very fast (0.15s) ease-out. It's a professional tool; speed matters."
+  },
+  "components": {
+    "buttons": "Brutalist. rounded-sm or rounded-none. Primary: bg-white text-black hover:bg-zinc-200. Secondary: bg-transparent border border-zinc-700 text-white hover:border-white.",
+    "cards": "Flat, sharp borders (border-zinc-800), bg-zinc-950/50. No shadow.",
+    "inputs": "Shadcn input with sharp borders, focus ring is 1px solid white (focus-visible:ring-1 focus-visible:ring-white focus-visible:ring-offset-0).",
+    "tables": "Dense. text-sm. Hover on row should be bg-zinc-900.",
+    "tabs": "Override shadcn default h-9 to h-auto. Active tab should have a sharp bottom border (border-b-2 border-white) or solid white background."
+  },
+  "media": {
+    "images": [
+      {
+        "url": "https://images.pexels.com/photos/3520697/pexels-photo-3520697.jpeg",
+        "description": "B&W circuit board. Use as a low-opacity, grayscale background for the Landing Page Hero section or API Docs header.",
+        "category": "background",
+        "styles": "opacity-20 mix-blend-overlay grayscale"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1685594496584-23198309c37a",
+        "description": "Futuristic autonomous car in dark setting. Use as a sample image/video poster in the Inference Studio demo area or landing page feature.",
+        "category": "demo_content"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1774901128215-3549cc686921",
+        "description": "Programmer coding screen. Use for the 'Model Hub' or 'API Docs' bento card on the landing page.",
+        "category": "feature_showcase"
+      }
+    ]
+  },
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "instructions": "Use Phosphor icons for a technical, crisp look. Weight should be 'regular' or 'bold'. E.g., Use WebCam, Image, Video, BoundingBox, Activity, ChartBar, Gear."
+  },
+  "instructions_to_main_agent": [
+    "INSTALLATION: yarn add @phosphor-icons/react",
+    "This is a professional CV tool, not a generic SaaS. Do not use generic soft shadows, gradients, or rounded corners > 4px.",
+    "The primary layout for the Inference Studio must use the 'Control Room' grid: dense, fully utilizing screen space. Use `h-[calc(100vh-64px)]` for the main studio to prevent page scrolling, utilizing internal scrolling only for sidebars.",
+    "All real-time inference stats (FPS, Latency, Memory) MUST be displayed using JetBrains Mono (font-mono) with tabular-nums.",
+    "Bounding boxes and segmentation masks rendered on the HTML canvas must use the 'cv_accents' colors for high contrast against camera/video streams.",
+    "Implement the dark theme strictly by using Tailwind dark mode classes or forcing a dark background on body.",
+    "Customize Shadcn components heavily: strip out ring-offset, soft shadows, and rounding. Replace with sharp 1px borders.",
+    "Data structure for CV tasks should use distinct visual identifiers. E.g., a green icon for detection, blue for segmentation, etc."
+  ],
+  "accessibility_and_testing": {
+    "testing_attributes": "CRITICAL: All interactive elements (buttons, task selectors, model toggles, upload zones, inference canvas) MUST include 'data-testid' attributes in kebab-case."
+  }
+}

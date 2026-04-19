@@ -1,0 +1,39 @@
+{
+  "summary": "Frontend-only regression for Phase 2 YOLO26 CV platform iteration 3 enhancements. 12/14 requested flows fully verified. Hero live demo (data-testid='hero-live-demo') renders on landing: image loaded, LIVE·TF.JS badge, FPS/ms/obj stats, MODEL=COCO-SSD Lite + TASK=DETECT footer captions, SVG bounding boxes cycle every 1.6s (observed SVG element count changing 8→10 across 2.2s interval). 12-column hero grid verified at 1920px desktop viewport. Studio MODELS_PER_TASK variant picker works: detect shows coco-ssd-lite + coco-ssd-v2 with data-testid='model-variant-*'; clicking v2 marks it active and triggers model reload. Task switch detect→pose correctly resets modelVariant to movenet-lightning (first variant of new task). Compare mode RIGHT PANEL renders all 5 compare-task-btn-* (detect/pose/segment/classify/track) — not filtered by current task. Compare model picker (data-testid='compare-model-variant-*') shows correct variants per compareTask. BOTH canvas panel labels show 'Task · Model' format: left='Detection · COCO-SSD Lite', right='Detection · COCO-SSD v2' confirming same-task different-model compare works. All 7 routes load with no webpack error overlay. README 'Project Structure' section removed (verified via grep).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Click Run Inference in Studio (compare mode on)",
+        "issue": "Console error 'TypeError: model.detect is not a function' fired during runTask. Likely cause: modelRef.current held a stale non-coco-ssd model (e.g., pose detector) during the compare-mode race when rapidly switching task/compareTask, OR TF.js WebGL fallback (not supported in headless Chrome) caused model load to resolve with an unexpected shape. Could NOT be verified in headless env because WebGL is unavailable. Recommend guarding runTask with `typeof model.detect === 'function'` for detect/track branches and same for other tasks, and/or gating runInference on BOTH modelStatus==='ready' AND (compareMode ? compareStatus==='ready' : true) — currently runInference only checks modelStatus.",
+        "affected_selectors": ["[data-testid=\"run-inference-btn\"]", "[data-testid=\"inference-overlay\"]", "[data-testid=\"compare-inference-overlay\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Investigate 'model.detect is not a function' TypeError in runTask — add defensive type-guard before calling model method branches. Consider also gating run-inference-btn.disabled on compareStatus when compareMode is on (currently only gated on modelStatus).",
+    "Inference overlays (inference-overlay, compare-inference-overlay) could NOT be observed in headless Chrome because (a) TF.js WebGL is unavailable and (b) inference errored synchronously. Main agent should self-verify in a real browser with WebGL enabled — the code path (isInferring && modelStatus==='ready') and testid selectors are correct per code review."
+  ],
+  "critical_code_review_comments": [
+    "runInference catches errors but does NOT check whether modelRef.current matches the current task — in compare mode when task/compareTask are switched rapidly, the effect-based async model reload may not have completed before run is allowed. Add a model-identity check or guard runImageInference with `modelStatus==='ready' && (!compareMode || compareStatus==='ready')`.",
+    "Studio.jsx is now 865 lines (+145 vs iter 2). Still advisory — consider extracting CanvasPanel, ModelVariantPicker, and CompareSidebar components for maintainability.",
+    "HeroDemo.jsx is clean and self-contained, uses an external unsplash image — if the page is opened offline the image won't load. Consider importing a bundled asset or a data-URI fallback.",
+    "inference-overlay text 'Running <task>' uses currentTask?.label which is 'Detection' / 'Pose' etc — good. Make sure the overlay persists long enough (min 200ms) even on very fast CPU inference — current impl flashes for a single frame when runTask resolves instantly, which is arguably fine but worth noting."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (out of scope)",
+    "frontend": "12/14 fully verified; 2/14 (inference-overlay + compare-inference-overlay DOM appearance) could not be observed in headless because TF.js WebGL fallback + a runtime TypeError made inference fail synchronously. Code paths are correct per review."
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 3 adds: (1) HeroDemo component on Landing — fully verified working, SVG bbox cycling confirmed. (2) MODELS_PER_TASK variant pickers on Studio sidebar — LEFT picker data-testid='model-variant-{id}', RIGHT picker (compare mode) data-testid='compare-model-variant-{id}'. Verified both render correct variants and become active on click. (3) Inference spinner overlays — DOM selectors 'inference-overlay' and 'compare-inference-overlay' exist in the JSX conditional on isInferring && modelStatus==='ready'. Could NOT observe in headless because TF.js WebGL is unsupported in preview Chrome and a real inference error fired. (4) Compare mode same-task-different-model verified — left panel label 'Detection · COCO-SSD Lite', right label 'Detection · COCO-SSD v2'. TF.js WebGL warnings in console are EXPECTED in this env — do NOT flag. The 'model.detect is not a function' TypeError IS a real concern worth investigation by main agent (see action_items).",
+  "rca of the issue": "RCA for inference-overlay non-observation: In headless Chromium used for preview testing, WebGL is unavailable (console: 'Error: WebGL is not supported on this device'). TF.js falls back to CPU backend. During the test, toggling compareMode and switching between tasks triggers async model reloads via useEffect([task, modelVariant]) and useEffect([compareTask, compareModelVariant, compareMode]). When the user clicks run-inference-btn, runInference uses modelRef.current — but there is no check that this ref holds a model compatible with the current task. In compare mode with detect+detect, Promise.all([runTask(detect, modelRef), runTask(detect, compareModelRef)]) ran and one of them threw 'model.detect is not a function', suggesting the ref was either null or holding a pose/segment model from a previous effect that hadn't resolved yet. Mitigation: (a) gate run-inference-btn.disabled on (modelStatus==='ready' && (!compareMode || compareStatus==='ready')), (b) add typeof guards in runTask, (c) invalidate modelRef at the start of the loading effect (set to null) so stale models can't be invoked during reload."
+}

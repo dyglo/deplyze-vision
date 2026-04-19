@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Claude "Pampas" light palette */
+    --background: 45 14% 95%;        /* #F4F3EE */
+    --foreground: 40 7% 8%;          /* #141413 */
+    --card: 0 0% 100%;
+    --card-foreground: 40 7% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 40 7% 8%;
+    --primary: 40 7% 8%;             /* #141413 cod-gray */
+    --primary-foreground: 45 14% 95%;
+    --secondary: 35 6% 68%;          /* #B1ADA1 cloudy */
+    --secondary-foreground: 40 7% 8%;
+    --muted: 40 8% 90%;
+    --muted-foreground: 35 5% 55%;
+    --accent: 18 51% 48%;            /* #C15F3C crail */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 46%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 38 10% 84%;            /* #DDD9D0 */
+    --input: 38 10% 84%;
+    --ring: 18 51% 48%;
+    --radius: 0.25rem;
+    /* CV task accents (unchanged - brand identity) */
+    --cv-detect: #00FF41;
+    --cv-segment: #00E5FF;
+    --cv-pose: #FF3366;
+    --cv-track: #FFD500;
+    --cv-classify: #B026FF;
+    /* Claude brand */
+    --pampas: #F4F3EE;
+    --cloudy: #B1ADA1;
+    --crail: #C15F3C;
+    --cod-gray: #141413;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-[#F4F3EE] text-[#141413];
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    color-scheme: light;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif;
+    color: #141413;
+  }
+  .font-mono, code, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #F4F3EE; }
+::-webkit-scrollbar-thumb { background: #DDD9D0; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #B1ADA1; }
+
+/* Canvas container */
+.canvas-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #E8E5DF;
+}
+
+canvas.inference-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* Stat live pulse */
+@keyframes stat-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.stat-live {
+  animation: stat-pulse 2s ease-in-out infinite;
+}
+
+/* Inference progress bar scan animation */
+@keyframes progress-scan {
+  0% { transform: translateX(-200%); }
+  100% { transform: translateX(600%); }
+}
+.progress-scan {
+  animation: progress-scan 1.2s linear infinite;
+}
+
+/* Compare mode split indicator */
+.compare-panel-label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+
+@layer base {
+  [data-debug-wrapper="true"] {
+    display: contents !important;
+  }
+}
