@@ -20,6 +20,7 @@ class TestModelConfigs:
         assert r.status_code == 200
         data = r.json()
         assert len(data) == 5
+        assert {m["family"] for m in data} == {"YOLO26"}
 
     def test_model_configs_have_required_fields(self):
         r = requests.get(f"{BASE_URL}/api/model-configs")
@@ -29,6 +30,8 @@ class TestModelConfigs:
             assert "name" in model
             assert "task" in model
             assert "is_builtin" in model
+            assert model["url"].startswith("/models/yolo26")
+            assert model["url"].endswith("/model.json")
 
     def test_filter_by_task(self):
         r = requests.get(f"{BASE_URL}/api/model-configs?task=detect")
