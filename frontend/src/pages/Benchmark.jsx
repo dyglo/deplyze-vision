@@ -1,308 +1,239 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+/**
+ * Deplyze Vision — Benchmark
+ * Compare Models by parameters, mAP, and historical speed data.
+ */
+import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import {
-  ChartLineUp, BoundingBox, PersonSimpleRun, Intersect, Tag, Path,
-  ArrowRight, Columns, Lightning, Timer, Target, TrendUp,
+  BoundingBox, PersonSimpleRun, Intersect, Tag, Path, Crosshair,
+  ChartLineUp, Lightning, Timer, Target, Columns, Scales, Star,
+  Database, HardDrives
 } from "@phosphor-icons/react";
+
+import { YOLO_MODELS, TASK_META } from "../utils/yoloModels";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-const TASK_META = {
-  detect:   { icon: BoundingBox,     color: "#008B22", label: "Detection",     bg: "#008B22" },
-  pose:     { icon: PersonSimpleRun, color: "#CC1144", label: "Pose",          bg: "#CC1144" },
-  segment:  { icon: Intersect,       color: "#0087B3", label: "Segmentation",  bg: "#0087B3" },
-  classify: { icon: Tag,             color: "#7B1CC4", label: "Classification", bg: "#7B1CC4" },
-  track:    { icon: Path,            color: "#B08000", label: "Tracking",       bg: "#B08000" },
+const TASK_ICONS = {
+  detect: BoundingBox,
+  seg: Intersect,
+  pose: PersonSimpleRun,
+  obb: Crosshair,
+  classify: Tag,
+  track: Path,
 };
 
-function MetricCard({ label, value, unit = "", color = "#141413", icon: Icon }) {
-  return (
-    <div className="bg-white border border-[#DDD9D0] rounded-sm p-4">
-      <div className="flex items-center gap-2 mb-2">
-        {Icon && <Icon size={14} style={{ color }} />}
-        <span className="text-[10px] font-mono text-[#B1ADA1] uppercase tracking-wider">{label}</span>
-      </div>
-      <div className="font-['Outfit'] text-2xl font-medium tabular-nums" style={{ color }}>
-        {value}<span className="text-sm text-[#B1ADA1] ml-1 font-normal">{unit}</span>
-      </div>
-    </div>
-  );
-}
-
-function PerfBar({ value, max, color }) {
+function PerfBar({ value, max, color, suffix = "" }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
-    <div className="flex items-center gap-3 flex-1">
-      <div className="flex-1 h-2 bg-[#EDE9E0] rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
+    <div className="flex items-center gap-3">
+      <div className="flex-1 h-1.5 bg-[#EDE9E0] rounded-full overflow-hidden flex items-center justify-end">
+        {/* We can make it right-aligned or left-aligned depending. Let's just do left-aligned. */}
+        <div className="h-full w-full rounded-full transition-all duration-500 origin-left" style={{ transform: `scaleX(${pct / 100})`, backgroundColor: color }} />
       </div>
-      <span className="font-mono text-xs tabular-nums text-[#5C5751] w-10 text-right">{value}</span>
+      <span className="font-mono text-[10px] tabular-nums text-[#8A8580] w-12 text-right">
+        {Number.isFinite(value) ? value.toFixed(1) : value}{suffix}
+      </span>
     </div>
   );
 }
 
 export default function Benchmark() {
-  const navigate = useNavigate();
   const [runs, setRuns] = useState([]);
-  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTask, setActiveTask] = useState("detect");
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    const [rr, sr] = await Promise.all([
-      axios.get(`${API}/runs?limit=200`),
-      axios.get(`${API}/stats`),
-    ]);
-    setRuns(rr.data);
-    setStats(sr.data);
-    setLoading(false);
+  useEffect(() => {
+    // Fetch all runs to calculate average local FPS per model
+    axios.get(`${API}/runs?limit=1000`)
+      .then(res => setRuns(res.data))
+      .catch(err => console.error(err))
+      .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // Compute aggregate stats per model
+  const modelStats = useMemo(() => {
+    const stats = {};
+    for (const r of runs) {
+      if (!r.stats?.fps || !r.model_name) continue;
+      // Extract model name (handle "Model A vs Model B" cases from compare mode)
+      const names = r.model_name.split(" vs ");
+      for (const rawName of names) {
+        const name = rawName.replace("(custom)", "").trim();
+        if (!stats[name]) stats[name] = { sumFps: 0, sumLat: 0, count: 0 };
+        stats[name].sumFps += r.stats.fps;
+        stats[name].sumLat += r.stats.latency;
+        stats[name].count += 1;
+      }
+    }
+    const avg = {};
+    for (const [name, d] of Object.entries(stats)) {
+      avg[name] = {
+        fps: d.sumFps / d.count,
+        latency: d.sumLat / d.count,
+        runs: d.count,
+      };
+    }
+    return avg;
+  }, [runs]);
 
-  // Aggregate metrics per task
-  const taskMetrics = Object.keys(TASK_META).map((task) => {
-    const taskRuns = runs.filter((r) => r.task === task);
-    const fpsList = taskRuns.map((r) => r.stats?.fps || 0).filter((v) => v > 0);
-    const latList = taskRuns.map((r) => r.stats?.latency || 0).filter((v) => v > 0);
-    const objList = taskRuns.map((r) => r.results_count || 0);
-    return {
-      task,
-      runs: taskRuns.length,
-      avgFps: fpsList.length ? Math.round(fpsList.reduce((a, b) => a + b, 0) / fpsList.length) : 0,
-      maxFps: fpsList.length ? Math.max(...fpsList) : 0,
-      avgLatency: latList.length ? Math.round(latList.reduce((a, b) => a + b, 0) / latList.length) : 0,
-      minLatency: latList.length ? Math.min(...latList) : 0,
-      avgObjects: objList.length ? (objList.reduce((a, b) => a + b, 0) / objList.length).toFixed(1) : 0,
-      totalObjects: objList.reduce((a, b) => a + b, 0),
-    };
-  });
+  // Combine YOLO_MODELS static data with dynamic run data
+  const comparisonData = useMemo(() => {
+    const taskModels = YOLO_MODELS.filter(m => m.task === activeTask);
+    return taskModels.map(m => {
+      const ms = modelStats[m.name];
+      return {
+        ...m,
+        avgFps: ms?.fps || 0,
+        avgLatency: ms?.latency || 0,
+        runCount: ms?.runs || 0,
+        // Parsed params (e.g. "3.2M" -> 3.2)
+        paramsParsed: parseFloat(m.params) || 0,
+        mapParsed: parseFloat(m.mapCOCO) || parseFloat(m.mapDOTA) || 0,
+      };
+    }).sort((a, b) => b.mapParsed - a.mapParsed); // sort by accuracy by default
+  }, [activeTask, modelStats]);
 
-  const maxFps = Math.max(...taskMetrics.map((t) => t.avgFps), 1);
-  const totalRuns = runs.length;
-  const allFps = runs.map((r) => r.stats?.fps || 0).filter((v) => v > 0);
-  const allLat = runs.map((r) => r.stats?.latency || 0).filter((v) => v > 0);
-  const overallAvgFps = allFps.length ? Math.round(allFps.reduce((a, b) => a + b, 0) / allFps.length) : 0;
-  const overallAvgLat = allLat.length ? Math.round(allLat.reduce((a, b) => a + b, 0) / allLat.length) : 0;
+  const maxMap = Math.max(...comparisonData.map(m => m.mapParsed), 50);
+  const maxParams = Math.max(...comparisonData.map(m => m.paramsParsed), 10);
+  const maxFps = Math.max(...comparisonData.map(m => m.avgFps), 30);
 
-  // Compare runs (runs that have compare data)
-  const compareRuns = runs.filter((r) => r.model_name?.includes(" vs "));
+  if (loading) {
+    return (
+      <div className="flex h-[calc(100vh-56px)] items-center justify-center bg-[#F8F7F2]">
+        <div className="animate-pulse flex items-center gap-2 text-sm font-mono text-[#B1ADA1]">
+          <Database className="animate-spin" /> Gathering benchmark telemetry...
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 max-w-6xl mx-auto min-h-[calc(100vh-56px)]">
+      <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="font-['Outfit'] text-2xl font-medium text-[#141413] tracking-tight">Benchmark</h1>
-          <p className="text-sm text-[#8A8580] mt-1">Auto-populated performance metrics from your inference runs</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={fetchData} className="px-3 py-2 border border-[#DDD9D0] text-[#8A8580] text-sm rounded-sm hover:border-[#B1ADA1] hover:text-[#141413] transition-colors">
-            Refresh
-          </button>
-          <button data-testid="go-to-studio-btn" onClick={() => navigate("/studio?compare=true")}
-            className="flex items-center gap-2 px-4 py-2 bg-[#141413] text-[#F4F3EE] text-sm font-medium rounded-sm hover:bg-[#2A2925] transition-colors">
-            <Columns size={14} />
-            Compare in Studio
-            <ArrowRight size={13} />
-          </button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-[#DDD9D0]">
-        {[{ id: "overview", label: "Overview" }, { id: "tasks", label: "Per-Task Metrics" }, { id: "compare", label: `Compare Runs (${compareRuns.length})` }].map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 text-sm transition-all border-b-2 -mb-px ${
-              activeTab === tab.id ? "border-[#C15F3C] text-[#141413] font-medium" : "border-transparent text-[#8A8580] hover:text-[#141413]"
-            }`}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center h-48 text-[#B1ADA1] text-sm font-mono">Loading benchmark data…</div>
-      ) : totalRuns === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border border-dashed border-[#DDD9D0] rounded-sm bg-white">
-          <ChartLineUp size={48} className="text-[#DDD9D0] mb-4" />
-          <h3 className="font-['Outfit'] text-lg font-medium text-[#141413] mb-2">No Benchmark Data Yet</h3>
-          <p className="text-sm text-[#8A8580] text-center max-w-sm mb-6">
-            Run inference in the Studio and save your results to start building your benchmark report.
+          <h1 className="font-['Outfit'] text-2xl font-medium text-[#141413] tracking-tight">Model Benchmark</h1>
+          <p className="text-sm text-[#8A8580] mt-1">
+            Compare model architectures by theoretical accuracy (mAP), size parameters, and real-world local performance.
           </p>
-          <button onClick={() => navigate("/studio")}
-            className="flex items-center gap-2 px-5 py-2 bg-[#141413] text-[#F4F3EE] text-sm rounded-sm hover:bg-[#2A2925] transition-colors">
-            <BoundingBox size={14} />Open Studio
-          </button>
+        </div>
+        <div className="px-4 py-2 bg-[#FFF8F0] border border-[#FFD9B5] rounded-sm text-xs font-mono text-[#C15F3C] flex items-center gap-2">
+          <Lightning weight="fill" /> Local execution metrics are averaged across all Studio runs.
+        </div>
+      </div>
+
+      {/* Task Filters */}
+      <div className="flex border-b border-[#DDD9D0] mb-8">
+        {Object.entries(TASK_META).map(([task, meta]) => {
+          const Icon = TASK_ICONS[task];
+          const active = activeTask === task;
+          return (
+            <button
+              key={task}
+              onClick={() => setActiveTask(task)}
+              className={`flex items-center gap-2 px-6 py-3 text-xs font-mono tracking-wider uppercase border-b-2 transition-colors ${
+                active ? "border-[currentColor] bg-white" : "border-transparent text-[#8A8580] hover:bg-white/50 hover:text-[#141413]"
+              }`}
+              style={{ color: active ? meta.color : undefined }}
+            >
+              <Icon size={16} weight={active ? "bold" : "regular"} />
+              {meta.shortLabel}
+            </button>
+          );
+        })}
+      </div>
+
+      {comparisonData.length === 0 ? (
+        <div className="text-center py-20 text-[#8A8580] font-mono text-sm border border-dashed border-[#DDD9D0] rounded-sm bg-white/50">
+          No built-in models configured for this task yet.
         </div>
       ) : (
-        <>
-          {/* Overview Tab */}
-          {activeTab === "overview" && (
-            <div className="space-y-6">
-              {/* Summary cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <MetricCard label="Total Runs" value={totalRuns} color="#141413" icon={Target} />
-                <MetricCard label="Avg FPS" value={overallAvgFps} color="#008B22" icon={Lightning} />
-                <MetricCard label="Avg Latency" value={overallAvgLat} unit="ms" color="#0087B3" icon={Timer} />
-                <MetricCard label="Tasks Tested" value={taskMetrics.filter((t) => t.runs > 0).length} color="#C15F3C" icon={TrendUp} />
-              </div>
-
-              {/* FPS by task - bar chart */}
-              <div className="bg-white border border-[#DDD9D0] rounded-sm p-5">
-                <h3 className="font-['Outfit'] text-base font-medium text-[#141413] mb-4">Average FPS by Task</h3>
-                <div className="space-y-3">
-                  {taskMetrics.filter((t) => t.runs > 0).sort((a, b) => b.avgFps - a.avgFps).map((t) => {
-                    const meta = TASK_META[t.task];
-                    return (
-                      <div key={t.task} className="flex items-center gap-3">
-                        <div className="w-28 flex items-center gap-2">
-                          <meta.icon size={12} style={{ color: meta.color }} />
-                          <span className="text-xs text-[#5C5751] font-mono">{meta.label}</span>
+        <div className="bg-white border border-[#DDD9D0] rounded-sm overflow-hidden shadow-sm">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-[#F8F7F2] border-b border-[#DDD9D0]">
+                <th className="px-4 py-3 text-[10px] font-mono text-[#8A8580] uppercase tracking-wider font-semibold w-1/5">Architecture</th>
+                <th className="px-4 py-3 text-[10px] font-mono text-[#8A8580] uppercase tracking-wider font-semibold w-[15%]">
+                  <div className="flex items-center gap-1"><HardDrives size={12}/> Size / Params</div>
+                </th>
+                <th className="px-4 py-3 text-[10px] font-mono text-[#8A8580] uppercase tracking-wider font-semibold w-[20%]">
+                  <div className="flex items-center gap-1"><Target size={12}/> Theoretical mAP</div>
+                </th>
+                <th className="px-4 py-3 text-[10px] font-mono text-[#8A8580] uppercase tracking-wider font-semibold w-[20%]">
+                  <div className="flex items-center gap-1"><Lightning size={12}/> Local Avg FPS</div>
+                </th>
+                <th className="px-4 py-3 text-[10px] font-mono text-[#8A8580] uppercase tracking-wider font-semibold w-1/4">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F4F3EE]">
+              {comparisonData.map((model, idx) => (
+                <tr key={model.id} className="hover:bg-[#F8F7F2]/50 transition-colors group">
+                  <td className="px-4 py-4">
+                    <div className="flex gap-2 items-center">
+                      {idx === 0 && <Star weight="fill" className="text-[#B08000]" size={14} title="Top Accuracy" />}
+                      {idx !== 0 && <div className="w-3.5" />}
+                      <div>
+                        <div className="font-['Outfit'] font-semibold text-[#141413] flex items-center gap-2">
+                          {model.name}
+                          <span className="px-1.5 py-0.5 text-[9px] bg-[#141413] text-[#F4F3EE] rounded-sm font-mono opacity-80 group-hover:opacity-100 transition-opacity">
+                            {model.family}
+                          </span>
                         </div>
-                        <PerfBar value={t.avgFps} max={maxFps} color={meta.color} />
-                        <span className="text-[10px] text-[#B1ADA1] font-mono w-12 text-right">{t.runs} runs</span>
+                        <div className="text-[10px] font-mono text-[#8A8580] mt-0.5">{model.sizeApprox} export</div>
                       </div>
-                    );
-                  })}
-                  {taskMetrics.every((t) => t.runs === 0) && (
-                    <p className="text-sm text-[#B1ADA1] font-mono text-center py-4">Run and save inference to populate chart</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Latency by task */}
-              <div className="bg-white border border-[#DDD9D0] rounded-sm p-5">
-                <h3 className="font-['Outfit'] text-base font-medium text-[#141413] mb-4">Average Latency by Task (lower is better)</h3>
-                <div className="space-y-3">
-                  {taskMetrics.filter((t) => t.runs > 0).sort((a, b) => a.avgLatency - b.avgLatency).map((t) => {
-                    const meta = TASK_META[t.task];
-                    const maxLat = Math.max(...taskMetrics.map((x) => x.avgLatency), 1);
-                    return (
-                      <div key={t.task} className="flex items-center gap-3">
-                        <div className="w-28 flex items-center gap-2">
-                          <meta.icon size={12} style={{ color: meta.color }} />
-                          <span className="text-xs text-[#5C5751] font-mono">{meta.label}</span>
-                        </div>
-                        <PerfBar value={t.avgLatency} max={maxLat} color={meta.color} />
-                        <span className="text-[10px] text-[#B1ADA1] font-mono w-16 text-right">{t.avgLatency}ms avg</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Task distribution pie (simple) */}
-              {stats?.task_distribution && Object.keys(stats.task_distribution).length > 0 && (
-                <div className="bg-white border border-[#DDD9D0] rounded-sm p-5">
-                  <h3 className="font-['Outfit'] text-base font-medium text-[#141413] mb-4">Run Distribution</h3>
-                  <div className="flex flex-wrap gap-3">
-                    {Object.entries(stats.task_distribution).map(([task, count]) => {
-                      const meta = TASK_META[task];
-                      const pct = Math.round((count / totalRuns) * 100);
-                      return (
-                        <div key={task} className="flex items-center gap-2 bg-[#F4F3EE] border border-[#DDD9D0] rounded-sm px-3 py-2">
-                          {meta && <meta.icon size={14} style={{ color: meta.color }} />}
-                          <span className="text-sm text-[#141413] font-medium">{meta?.label || task}</span>
-                          <span className="text-sm font-mono tabular-nums" style={{ color: meta?.color }}>{count}</span>
-                          <span className="text-xs text-[#B1ADA1] font-mono">({pct}%)</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Per-Task Metrics Tab */}
-          {activeTab === "tasks" && (
-            <div className="space-y-4">
-              <div className="border border-[#DDD9D0] rounded-sm overflow-hidden bg-white">
-                <table className="w-full text-sm" data-testid="task-metrics-table">
-                  <thead>
-                    <tr className="border-b border-[#DDD9D0] bg-[#F4F3EE]">
-                      {["Task", "Runs", "Avg FPS", "Max FPS", "Avg Latency", "Min Latency", "Avg Objects", "Total Objects"].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left font-mono text-[10px] text-[#B1ADA1] uppercase tracking-wider">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {taskMetrics.map((t) => {
-                      const meta = TASK_META[t.task];
-                      return (
-                        <tr key={t.task} className={`border-b border-[#F4F3EE] hover:bg-[#F4F3EE] transition-colors ${t.runs === 0 ? "opacity-40" : ""}`}>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <meta.icon size={13} style={{ color: meta.color }} />
-                              <span className="font-medium text-[#141413]">{meta.label}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 font-mono text-[#141413] tabular-nums">{t.runs}</td>
-                          <td className="px-4 py-3 font-mono tabular-nums" style={{ color: t.avgFps > 0 ? "#008B22" : "#B1ADA1" }}>{t.avgFps || "—"}</td>
-                          <td className="px-4 py-3 font-mono tabular-nums text-[#5C5751]">{t.maxFps || "—"}</td>
-                          <td className="px-4 py-3 font-mono tabular-nums" style={{ color: t.avgLatency > 0 ? "#0087B3" : "#B1ADA1" }}>{t.avgLatency ? `${t.avgLatency}ms` : "—"}</td>
-                          <td className="px-4 py-3 font-mono tabular-nums text-[#5C5751]">{t.minLatency ? `${t.minLatency}ms` : "—"}</td>
-                          <td className="px-4 py-3 font-mono tabular-nums text-[#5C5751]">{t.avgObjects}</td>
-                          <td className="px-4 py-3 font-mono tabular-nums text-[#141413]">{t.totalObjects}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-xs text-[#B1ADA1] font-mono">
-                Metrics are computed from all saved inference runs. Run inference in Studio and save runs to populate.
-              </p>
-            </div>
-          )}
-
-          {/* Compare Runs Tab */}
-          {activeTab === "compare" && (
-            <div>
-              {compareRuns.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 border border-dashed border-[#DDD9D0] rounded-sm bg-white">
-                  <Columns size={32} className="text-[#DDD9D0] mb-3" />
-                  <p className="text-sm text-[#8A8580]">No compare runs yet</p>
-                  <p className="text-xs text-[#B1ADA1] mt-1">Enable Compare Mode in Studio and save runs</p>
-                  <button onClick={() => navigate("/studio")} className="mt-4 flex items-center gap-2 px-4 py-1.5 bg-[#141413] text-[#F4F3EE] text-xs rounded-sm hover:bg-[#2A2925]">
-                    <Columns size={12} />Open Studio Compare
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <p className="text-xs text-[#8A8580] font-mono">{compareRuns.length} side-by-side comparison runs</p>
-                  <div className="border border-[#DDD9D0] rounded-sm overflow-hidden bg-white">
-                    <table className="w-full text-xs" data-testid="compare-runs-table">
-                      <thead>
-                        <tr className="border-b border-[#DDD9D0] bg-[#F4F3EE]">
-                          {["Models Compared", "Source", "Objects", "FPS", "Latency", "Date"].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left font-mono text-[10px] text-[#B1ADA1] uppercase tracking-wider">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {compareRuns.map((run) => (
-                          <tr key={run.id} className="border-b border-[#F4F3EE] hover:bg-[#F4F3EE] transition-colors">
-                            <td className="px-4 py-3 font-mono text-[#141413]">{run.model_name}</td>
-                            <td className="px-4 py-3 text-[#8A8580]">{run.source_type}</td>
-                            <td className="px-4 py-3 font-mono text-[#141413] tabular-nums">{run.results_count}</td>
-                            <td className="px-4 py-3 font-mono tabular-nums" style={{ color: "#008B22" }}>{run.stats?.fps || "—"}</td>
-                            <td className="px-4 py-3 font-mono tabular-nums" style={{ color: "#0087B3" }}>{run.stats?.latency ? `${run.stats.latency}ms` : "—"}</td>
-                            <td className="px-4 py-3 font-mono text-[#B1ADA1]">{new Date(run.created_at).toLocaleDateString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </>
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 align-middle">
+                    <PerfBar value={model.paramsParsed} max={maxParams} color="#4A4742" suffix="M" />
+                  </td>
+                  <td className="px-4 py-4 align-middle">
+                    <PerfBar value={model.mapParsed} max={maxMap} color="#0087B3" />
+                  </td>
+                  <td className="px-4 py-4 align-middle">
+                    {model.avgFps > 0 ? (
+                      <PerfBar value={model.avgFps} max={maxFps} color="#008B22" />
+                    ) : (
+                      <span className="text-[10px] font-mono text-[#B1ADA1] block text-center bg-[#F4F3EE] rounded py-0.5">Untested</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-4 align-middle">
+                    <p className="text-[10px] text-[#5C5751] leading-relaxed max-w-[200px]">
+                      {model.description}
+                    </p>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="px-4 py-3 bg-[#F8F7F2] border-t border-[#DDD9D0] text-[10px] font-mono text-[#8A8580] flex justify-between">
+            <span>YOLO architecture performance varies greatly based on CPU, RAM, and WebGL backend limits.</span>
+            <span>Based on {runs.length} recorded Studio runs.</span>
+          </div>
+        </div>
       )}
+
+      {/* Feature matrix */}
+      <div className="mt-12">
+        <h2 className="font-['Outfit'] text-lg font-medium text-[#141413] mb-4">Architecture Matrix</h2>
+        <div className="grid grid-cols-4 gap-4">
+          <div className="bg-[#141413] p-4 rounded-sm border border-[#2A2925] text-white">
+            <h3 className="font-mono text-sm mb-2 text-[#00FF41]">YOLOv10</h3>
+            <p className="text-[11px] leading-relaxed opacity-80">Introduced spatial-channel decoupled downsampling and NMS-free training. Superior inference speed as it requires absolutely zero post-processing Non-Maximum Suppression.</p>
+          </div>
+          <div className="bg-white p-4 rounded-sm border border-[#DDD9D0]">
+            <h3 className="font-mono text-sm mb-2 text-[#6B21A8] font-semibold">YOLOv8</h3>
+            <p className="text-[11px] leading-relaxed text-[#5C5751]">The current industry standard. Anchor-free detection with new loss functions. Perfect balance of accuracy vs parameters, but relies heavily on post-NMS.</p>
+          </div>
+          <div className="bg-[#FFF8F0] border-[#FFD9B5] p-4 rounded-sm border">
+            <h3 className="font-mono text-sm mb-2 text-[#C15F3C] font-semibold">YOLO26 / Ultralytics</h3>
+            <p className="text-[11px] leading-relaxed text-[#5C5751]">The latest internal iterations. Combines NMS-free paradigms with attention mechanisms while retaining extremely high zero-shot transfer capabilities.</p>
+          </div>
+          <div className="bg-[#F4F3EE] p-4 rounded-sm border border-[#DDD9D0]">
+            <h3 className="font-mono text-sm mb-2 text-[#4A4742] font-semibold">YOLOv5</h3>
+            <p className="text-[11px] leading-relaxed text-[#5C5751]">The legacy baseline. Anchor-based detection. Still retains the absolute smallest nano sizes and best fallback support for older TF.js WASM backends.</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

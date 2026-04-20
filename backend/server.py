@@ -3,6 +3,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import PyMongoError
 import os
 import logging
 from pathlib import Path
@@ -21,61 +22,82 @@ db = client[os.environ['DB_NAME']]
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# ── Default model configs (defined early for lifespan use) ───────────────────
+# ── YOLO model registry (seeded on startup) ──────────────────────────────────
+# Built-ins mirror the frontend YOLO26 TF.js registry. Custom user models remain
+# separate records with is_builtin=False.
 DEFAULT_MODELS = [
     {
-        "name": "COCO-SSD Detection",
-        "task": "detect",
-        "url": "",
-        "description": "Real-time object detection on 80 COCO classes using COCO-SSD. Runs in-browser via TF.js WebGL backend.",
-        "labels": ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat"],
-        "is_builtin": True,
+        "name": "YOLO26n", "family": "YOLO26", "variant": "nano",
+        "task": "detect", "url": "/models/yolo26n_web_model/model.json",
+        "builtin_id": "yolo26n-det",
+        "description": "YOLO26 nano object detection exported to TensorFlow.js.",
+        "num_classes": 80, "input_size": 640, "is_builtin": True,
     },
     {
-        "name": "MoveNet Pose Lightning",
-        "task": "pose",
-        "url": "",
-        "description": "Single-person pose estimation detecting 17 keypoints. Ultra-fast (50ms) using MoveNet Lightning architecture.",
-        "labels": ["nose", "left_eye", "right_eye", "left_ear", "right_ear", "left_shoulder", "right_shoulder"],
-        "is_builtin": True,
+        "name": "YOLO26n-seg", "family": "YOLO26", "variant": "nano",
+        "task": "seg", "url": "/models/yolo26n-seg_web_model/model.json",
+        "builtin_id": "yolo26n-seg",
+        "description": "YOLO26 nano instance segmentation exported to TensorFlow.js.",
+        "num_classes": 80, "input_size": 640, "is_builtin": True,
     },
     {
-        "name": "BodyPix Segmentation",
-        "task": "segment",
-        "url": "",
-        "description": "Person segmentation separating foreground from background. Uses MobileNetV1 backbone for browser-optimized performance.",
-        "labels": ["person", "background"],
-        "is_builtin": True,
+        "name": "YOLO26n-pose", "family": "YOLO26", "variant": "nano",
+        "task": "pose", "url": "/models/yolo26n-pose_web_model/model.json",
+        "builtin_id": "yolo26n-pose",
+        "description": "YOLO26 nano pose with 17 COCO keypoints.",
+        "num_classes": 1, "input_size": 640, "num_keypoints": 17, "is_builtin": True,
     },
     {
-        "name": "MobileNet Classification",
-        "task": "classify",
-        "url": "",
-        "description": "ImageNet classification on 1000 classes using MobileNetV2. Optimized for mobile and browser deployment.",
-        "labels": ["1000 ImageNet classes"],
-        "is_builtin": True,
+        "name": "YOLO26n-obb", "family": "YOLO26", "variant": "nano",
+        "task": "obb", "url": "/models/yolo26n-obb_web_model/model.json",
+        "builtin_id": "yolo26n-obb",
+        "description": "YOLO26 nano oriented bounding boxes (DOTA dataset).",
+        "num_classes": 16, "input_size": 640, "is_builtin": True,
     },
     {
-        "name": "COCO-SSD Tracking",
-        "task": "track",
-        "url": "",
-        "description": "Multi-object tracking using COCO-SSD detection + centroid-based tracker. Assigns persistent IDs across frames.",
-        "labels": ["person", "bicycle", "car", "motorcycle", "airplane", "bus"],
-        "is_builtin": True,
+        "name": "YOLO26n-cls", "family": "YOLO26", "variant": "nano",
+        "task": "classify", "url": "/models/yolo26n-cls_web_model/model.json",
+        "builtin_id": "yolo26n-cls",
+        "description": "YOLO26 nano ImageNet classification exported to TensorFlow.js.",
+        "num_classes": 1000, "input_size": 224, "is_builtin": True,
     },
 ]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: seed default models
-    count = await db.model_configs.count_documents({"is_builtin": True})
-    if count == 0:
+    # Startup: keep current YOLO26 built-ins aligned and remove stale built-ins.
+    app.state.mongo_available = False
+    try:
+        await client.admin.command("ping")
+        app.state.mongo_available = True
+
+        builtin_ids = [m["builtin_id"] for m in DEFAULT_MODELS]
+        await db.model_configs.delete_many({
+            "is_builtin": True,
+            "builtin_id": {"$nin": builtin_ids},
+        })
+
         for m in DEFAULT_MODELS:
+            builtin_id = m.get("builtin_id")
+            if not builtin_id:
+                continue
             mc = ModelConfig(**m)
-            await db.model_configs.insert_one(mc.model_dump())
-        logger.info("Seeded %d default model configs", len(DEFAULT_MODELS))
+            existing = await db.model_configs.find_one({"builtin_id": builtin_id}, {"_id": 0})
+            update_doc = mc.model_dump(exclude={"id", "created_at"})
+            if existing and existing.get("url") and existing.get("url") != "":
+                update_doc["url"] = existing["url"]
+            await db.model_configs.update_one(
+                {"builtin_id": builtin_id},
+                {
+                    "$set": update_doc,
+                    "$setOnInsert": {"id": mc.id, "created_at": mc.created_at},
+                },
+                upsert=True,
+            )
+        logger.info("YOLO model registry synced (%d entries)", len(DEFAULT_MODELS))
+    except PyMongoError as exc:
+        logger.warning("MongoDB unavailable; running with in-memory YOLO26 defaults only: %s", exc)
     yield
-    # Shutdown
     client.close()
 
 app = FastAPI(
@@ -96,6 +118,17 @@ def now_iso():
 
 def new_id():
     return str(uuid.uuid4())
+
+def default_model_configs(task: Optional[str] = None):
+    docs = []
+    for item in DEFAULT_MODELS:
+        if task and item.get("task") != task:
+            continue
+        model = ModelConfig(**item)
+        data = model.model_dump()
+        data["id"] = item["builtin_id"]
+        docs.append(data)
+    return docs
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
 
@@ -144,8 +177,15 @@ class ModelConfigCreate(BaseModel):
     task: str
     url: str = ""
     description: str = ""
-    labels: List[str] = []
+    # YOLO-specific fields
+    builtin_id: Optional[str] = None     # links to frontend yoloModels.js registry
+    family: Optional[str] = None          # "YOLO26", "YOLOv8", etc.
+    variant: Optional[str] = None         # "nano", "small", etc.
+    num_classes: int = 80
+    input_size: int = 640
+    num_keypoints: int = 17               # for pose models
     is_builtin: bool = False
+    labels: List[str] = []
 
 class ModelConfig(ModelConfigCreate):
     id: str = Field(default_factory=new_id)
@@ -258,13 +298,19 @@ async def list_model_configs(task: Optional[str] = Query(None)):
     query = {}
     if task:
         query["task"] = task
-    docs = await db.model_configs.find(query, {"_id": 0}).sort("created_at", 1).to_list(100)
-    return docs
+    try:
+        docs = await db.model_configs.find(query, {"_id": 0}).sort("created_at", 1).to_list(100)
+        return docs or default_model_configs(task)
+    except PyMongoError:
+        return default_model_configs(task)
 
 @api_router.post("/model-configs", response_model=ModelConfig)
 async def create_model_config(data: ModelConfigCreate):
     mc = ModelConfig(**data.model_dump())
-    await db.model_configs.insert_one(mc.model_dump())
+    try:
+        await db.model_configs.insert_one(mc.model_dump())
+    except PyMongoError:
+        raise HTTPException(status_code=503, detail="MongoDB is unavailable")
     return mc
 
 @api_router.delete("/model-configs/{config_id}")
@@ -320,6 +366,3 @@ app.add_middleware(
 )
 
 # ── Startup: seed default model configs ──────────────────────────────────────
-
-
-
